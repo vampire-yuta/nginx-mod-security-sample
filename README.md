@@ -46,7 +46,7 @@ wget https://nginx.org/download/nginx-1.28.0.tar.gz
 tar xvzf nginx-1.28.0.tar.gz
 useradd -r -M -s /sbin/nologin -d /usr/local/nginx nginx
 cd nginx-1.28.0
-./configure --user=nginx --group=nginx --with-pcre-jit --with-debug --with-compat --with-http_ssl_module --with-http_realip_module --add-dynamic-module=/root/ModSecurity-nginx --http-log-path=/var/log/nginx/access.log --error-log-path=/var/log/nginx/error.log
+./configure --user=nginx --group=nginx --with-pcre-jit --with-debug --with-compat --with-http_ssl_module --with-http_realip_module --with-stream --add-dynamic-module=/root/ModSecurity-nginx --http-log-path=/var/log/nginx/access.log --error-log-path=/var/log/nginx/error.log
 
 make
 make modules
@@ -64,7 +64,7 @@ nginx version: nginx/1.28.0
 built by gcc 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04)
 built with OpenSSL 3.0.13 30 Jan 2024
 TLS SNI support enabled
-configure arguments: --user=nginx --group=nginx --with-pcre-jit --with-debug --with-compat --with-http_ssl_module --with-http_realip_module --add-dynamic-module=/root/ModSecurity-nginx --http-log-path=/var/log/nginx/access.log --error-log-path=/var/log/nginx/error.log
+configure arguments: --user=nginx --group=nginx --with-pcre-jit --with-debug --with-compat --with-http_ssl_module --with-http_realip_module --with-stream --add-dynamic-module=/root/ModSecurity-nginx --http-log-path=/var/log/nginx/access.log --error-log-path=/var/log/nginx/error.log
 ```
 
 ### 6. ModSecurity設定ファイルの配置
@@ -115,6 +115,31 @@ http {
     }
 }
 ```
+
+### 7-1. streamモジュールの使用（オプション）
+
+nginxのstreamモジュールを使用してTCP/UDPプロキシを行うことができます。
+
+**注意**: ModSecurityはHTTP/HTTPSリクエストに対してのみ動作します。streamモジュールで処理されるTCP/UDPトラフィックにはModSecurityは適用されません。
+
+stream設定の例:
+
+```nginx
+stream {
+    server {
+        listen 3306;
+        proxy_pass backend_mysql;
+        proxy_timeout 1s;
+        proxy_responses 1;
+    }
+    
+    upstream backend_mysql {
+        server 192.168.1.10:3306;
+    }
+}
+```
+
+上記の例を`nginx.conf`に追加することで、TCPプロキシとして動作します（例: MySQLへのプロキシ）。
 
 ### 8. ModSecurityルールエンジンの有効化
 
