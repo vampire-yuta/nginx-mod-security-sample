@@ -1,1 +1,240 @@
 # nginx-mod-security-sample
+
+## インストール手順
+
+### 1. rootユーザーへの切り替え
+
+```bash
+sudo su -
+```
+
+### 2. 前提パッケージのインストール
+
+Ubuntu 24.04向けのパッケージリスト:
+
+```bash
+apt update -y
+apt upgrade -y
+
+apt install g++ flex bison curl apache2-dev doxygen libyajl-dev ssdeep liblua5.3-dev libgeoip-dev libtool dh-autoreconf libcurl4-gnutls-dev libxml2 libpcre3-dev libxml2-dev git liblmdb-dev libpkgconf3 lmdb-doc pkgconf zlib1g-dev libssl-dev -y
+```
+
+### 3. ModSecurity v3のビルドとインストール
+
+```bash
+cd ~
+wget https://github.com/SpiderLabs/ModSecurity/releases/download/v3.0.14/modsecurity-v3.0.14.tar.gz
+tar -xvzf modsecurity-v3.0.14.tar.gz
+cd modsecurity-v3.0.14
+./build.sh
+./configure
+make
+make install
+```
+
+### 4. ModSecurity-nginx Connectorの取得
+
+```bash
+cd ~
+git clone https://github.com/SpiderLabs/ModSecurity-nginx.git
+```
+
+### 5. nginxのビルドとインストール
+
+```bash
+wget https://nginx.org/download/nginx-1.28.0.tar.gz
+tar xvzf nginx-1.28.0.tar.gz
+useradd -r -M -s /sbin/nologin -d /usr/local/nginx nginx
+cd nginx-1.28.0
+./configure --user=nginx --group=nginx --with-pcre-jit --with-debug --with-compat --with-http_ssl_module --with-http_realip_module --add-dynamic-module=/root/ModSecurity-nginx --http-log-path=/var/log/nginx/access.log --error-log-path=/var/log/nginx/error.log
+
+make
+make modules
+make install
+
+ln -s /usr/local/nginx/sbin/nginx /usr/local/sbin/
+
+nginx -V
+```
+
+**出力結果の確認:**
+
+```
+nginx version: nginx/1.28.0
+built by gcc 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04)
+built with OpenSSL 3.0.13 30 Jan 2024
+TLS SNI support enabled
+configure arguments: --user=nginx --group=nginx --with-pcre-jit --with-debug --with-compat --with-http_ssl_module --with-http_realip_module --add-dynamic-module=/root/ModSecurity-nginx --http-log-path=/var/log/nginx/access.log --error-log-path=/var/log/nginx/error.log
+```
+
+### 6. ModSecurity設定ファイルの配置
+
+```bash
+cp ~/modsecurity-v3.0.14/modsecurity.conf-recommended /usr/local/nginx/conf/modsecurity.conf
+cp ~/modsecurity-v3.0.14/unicode.mapping /usr/local/nginx/conf/
+
+cp /usr/local/nginx/conf/nginx.conf{,.bak}
+```
+
+### 7. nginx.confの設定
+
+```bash
+vim /usr/local/nginx/conf/nginx.conf
+```
+
+以下のコンフィグで上書きする:
+
+```nginx
+load_module modules/ngx_http_modsecurity_module.so;
+user  nginx;
+worker_processes  1;
+pid        /run/nginx.pid;
+events {
+    worker_connections  1024;
+}
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+    sendfile        on;
+    keepalive_timeout  65;
+    server {
+        listen       80;
+        server_name  nginx.example.com;
+        modsecurity  on;
+        modsecurity_rules_file  /usr/local/nginx/conf/modsecurity.conf;
+        access_log  /var/log/nginx/access_example.log;
+        error_log  /var/log/nginx/error_example.log;
+        location / {
+            root   html;
+            index  index.html index.htm;
+        }
+        error_page   500 502 503 504  /50x.html;
+        location = /50x.html {
+            root   html;
+        }
+    }
+}
+```
+
+### 8. ModSecurityルールエンジンの有効化
+
+```bash
+sed -i 's/SecRuleEngine DetectionOnly/SecRuleEngine On/' /usr/local/nginx/conf/modsecurity.conf
+```
+
+### 9. ModSecurityコアルールセット（OWASP CRS）のインストール
+
+```bash
+cd /root/
+git clone https://github.com/SpiderLabs/owasp-modsecurity-crs.git /usr/local/nginx/conf/owasp-crs
+
+cp /usr/local/nginx/conf/owasp-crs/crs-setup.conf{.example,}
+
+echo -e "Include owasp-crs/crs-setup.conf\nInclude owasp-crs/rules/*.conf" >> /usr/local/nginx/conf/modsecurity.conf
+
+nginx -t
+```
+
+### 10. systemdサービスの設定
+
+```bash
+vim /etc/systemd/system/nginx.service
+```
+
+以下の内容を設定:
+
+```ini
+[Unit]
+Description=A high performance web server and a reverse proxy server
+Documentation=man:nginx(8)
+After=network.target nss-lookup.target
+
+[Service]
+Type=forking
+PIDFile=/run/nginx.pid
+ExecStartPre=/usr/local/nginx/sbin/nginx -t -q -g 'daemon on; master_process on;'
+ExecStart=/usr/local/nginx/sbin/nginx -g 'daemon on; master_process on;'
+ExecReload=/usr/local/nginx/sbin/nginx -g 'daemon on; master_process on;' -s reload
+ExecStop=-/sbin/start-stop-daemon --quiet --stop --retry QUIT/5 --pidfile /run/nginx.pid
+TimeoutStopSec=5
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+systemctl daemon-reload
+
+systemctl start nginx
+systemctl enable nginx
+```
+
+### 11. サービス状態の確認
+
+```bash
+systemctl status nginx
+```
+
+**出力例:**
+
+```
+● nginx.service - A high performance web server and a reverse proxy server
+     Loaded: loaded (/etc/systemd/system/nginx.service; enabled; preset: enabled)
+     Active: active (running) since Tue 2025-11-04 10:06:04 UTC; 7s ago
+       Docs: man:nginx(8)
+   Main PID: 10296 (nginx)
+      Tasks: 2 (limit: 4599)
+     Memory: 19.7M (peak: 20.1M)
+        CPU: 162ms
+     CGroup: /system.slice/nginx.service
+             ├─10296 "nginx: master process /usr/local/nginx/sbin/nginx -g daemon on; master_process on;"
+             └─10297 "nginx: worker process"
+
+Nov 04 10:06:04 ubuntu-nginx-mod-security systemd[1]: Starting nginx.service - A high performance web server and a reverse proxy server...
+Nov 04 10:06:04 ubuntu-nginx-mod-security systemd[1]: Started nginx.service - A high performance web server and a reverse proxy server.
+```
+
+### 12. 動作確認
+
+コマンドインジェクション攻撃のテスト:
+
+```bash
+curl localhost?doc=/bin/ls
+```
+
+**レスポンス:**
+
+```
+<html>
+<head><title>403 Forbidden</title></head>
+<body>
+<center><h1>403 Forbidden</h1></center>
+<hr><center>nginx/1.28.0</center>
+</body>
+</html>
+```
+
+ModSecurityの監査ログを確認:
+
+```bash
+tail /var/log/modsec_audit.log
+```
+
+**ログ出力例:**
+
+```
+---qZZXOeQw---H--
+ModSecurity: Warning. Matched "Operator `PmFromFile' with parameter `unix-shell.data' against variable `ARGS:doc' (Value: `/bin/ls' ) [file "/usr/local/nginx/conf/owasp-crs/rules/REQUEST-932-APPLICATION-ATTACK-RCE.conf"] [line "496"] [id "932160"] [rev ""] [msg "Remote Command Execution: Unix Shell Code Found"] [data "Matched Data: bin/ls found within ARGS:doc: /bin/ls"] [severity "2"] [ver "OWASP_CRS/3.2.0"] [maturity "0"] [accuracy "0"] [tag "application-multi"] [tag "language-shell"] [tag "platform-unix"] [tag "attack-rce"] [tag "paranoia-level/1"] [tag "OWASP_CRS"] [tag "OWASP_CRS/WEB_ATTACK/COMMAND_INJECTION"] [tag "WASCTC/WASC-31"] [tag "OWASP_TOP_10/A1"] [tag "PCI/6.5.2"] [hostname "localhost"] [uri "/"] [unique_id "176225081053.834961"] [ref "o1,6v10,7t:urlDecodeUni,t:cmdLine,t:normalizePath,t:lowercase"]
+ModSecurity: Access denied with code 403 (phase 2). Matched "Operator `Ge' with parameter `5' against variable `TX:ANOMALY_SCORE' (Value: `5' ) [file "/usr/local/nginx/conf/owasp-crs/rules/REQUEST-949-BLOCKING-EVALUATION.conf"] [line "80"] [id "949110"] [rev ""] [msg "Inbound Anomaly Score Exceeded (Total Score: 5)"] [data ""] [severity "2"] [ver "OWASP_CRS/3.2.0"] [maturity "0"] [accuracy "0"] [tag "application-multi"] [tag "language-multi"] [tag "platform-multi"] [tag "attack-generic"] [hostname "localhost"] [uri "/"] [unique_id "176225081053.834961"] [ref ""]
+
+---qZZXOeQw---I--
+
+---qZZXOeQw---J--
+
+---qZZXOeQw---Z--
+```
+
+## 参考リンク
+
+- https://linux-jp.org/?p=12951
