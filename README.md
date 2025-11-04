@@ -118,9 +118,9 @@ http {
 
 ### 7-1. streamモジュールの使用（オプション）
 
-nginxのstreamモジュールを使用してTCP/UDPプロキシを行うことができます。
+nginxのstreamモジュールを使用してTCP/UDPプロキシを行うことができる。
 
-**注意**: ModSecurityはHTTP/HTTPSリクエストに対してのみ動作します。streamモジュールで処理されるTCP/UDPトラフィックにはModSecurityは適用されません。
+**注意**: ModSecurityはHTTP/HTTPSリクエストに対してのみ動作する。streamモジュールで処理されるTCP/UDPトラフィックにはModSecurityは適用されない。
 
 stream設定の例:
 
@@ -139,7 +139,7 @@ stream {
 }
 ```
 
-上記の例を`nginx.conf`に追加することで、TCPプロキシとして動作します（例: MySQLへのプロキシ）。
+上記の例を`nginx.conf`に追加することで、TCPプロキシとして動作する（例: MySQLへのプロキシ）。
 
 ### 8. ModSecurityルールエンジンの有効化
 
@@ -159,6 +159,151 @@ echo -e "Include owasp-crs/crs-setup.conf\nInclude owasp-crs/rules/*.conf" >> /u
 
 nginx -t
 ```
+
+### 9-1. OWASP CRSルールリストの確認
+
+OWASP CRSのルールは以下の場所に配置される:
+
+```bash
+# ルールファイルの一覧を確認
+ls -la /usr/local/nginx/conf/owasp-crs/rules/
+
+# 特定のルールIDを検索（例: 932160）
+grep -r "id:932160" /usr/local/nginx/conf/owasp-crs/rules/
+
+# 特定のカテゴリのルールを確認（例: RCE - Remote Command Execution）
+cat /usr/local/nginx/conf/owasp-crs/rules/REQUEST-932-APPLICATION-ATTACK-RCE.conf | grep -E "id:|msg:"
+
+# 全てのルールIDとメッセージを抽出
+grep -hE "id:[0-9]+|msg:" /usr/local/nginx/conf/owasp-crs/rules/*.conf | grep -A1 "id:" | less
+```
+
+**ルールファイルの主なカテゴリ:**
+
+- `REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf` - 除外ルール（CRSの前）
+- `REQUEST-901-INITIALIZATION.conf` - 初期化ルール
+- `REQUEST-905-COMMON-EXCEPTIONS.conf` - 共通例外
+- `REQUEST-910-IP-REPUTATION.conf` - IPレピュテーション
+- `REQUEST-911-METHOD-ENFORCEMENT.conf` - メソッド強制
+- `REQUEST-912-DOS-PROTECTION.conf` - DoS保護
+- `REQUEST-913-SCANNER-DETECTION.conf` - スキャナー検出
+- `REQUEST-920-PROTOCOL-ENFORCEMENT.conf` - プロトコル強制
+- `REQUEST-921-PROTOCOL-ATTACK.conf` - プロトコル攻撃
+- `REQUEST-930-APPLICATION-ATTACK-LFI.conf` - Local File Inclusion
+- `REQUEST-931-APPLICATION-ATTACK-RFI.conf` - Remote File Inclusion
+- `REQUEST-932-APPLICATION-ATTACK-RCE.conf` - Remote Command Execution
+- `REQUEST-933-APPLICATION-ATTACK-PHP.conf` - PHP攻撃
+- `REQUEST-934-APPLICATION-ATTACK-NODEJS.conf` - Node.js攻撃
+- `REQUEST-941-APPLICATION-ATTACK-XSS.conf` - Cross-Site Scripting
+- `REQUEST-942-APPLICATION-ATTACK-SQLI.conf` - SQL Injection
+- `REQUEST-943-APPLICATION-ATTACK-SESSION-FIXATION.conf` - セッション固定
+- `REQUEST-944-APPLICATION-ATTACK-JAVA.conf` - Java攻撃
+- `REQUEST-949-BLOCKING-EVALUATION.conf` - ブロッキング評価
+- `RESPONSE-950-DATA-LEAKAGES.conf` - データ漏洩
+- `RESPONSE-951-DATA-LEAKAGES-SQL.conf` - SQLデータ漏洩
+- `RESPONSE-952-DATA-LEAKAGES-JAVA.conf` - Javaデータ漏洩
+- `RESPONSE-953-DATA-LEAKAGES-PHP.conf` - PHPデータ漏洩
+- `RESPONSE-954-DATA-LEAKAGES-IIS.conf` - IISデータ漏洩
+
+**ルールIDの見方:**
+
+ログに表示されるルールID（例: `932160`）は、対応するルールファイル内で定義されている。各ルールには以下の情報が含まれる:
+
+- `id`: ルールID（例: 932160）
+- `msg`: ルールの説明メッセージ
+- `tag`: 攻撃タイプのタグ
+- `severity`: 深刻度（0-9）
+- `rev`: リビジョン番号
+
+### 9-2. 特定のルールの除外
+
+特定のルールIDやタグのルールを除外する方法:
+
+#### 方法1: nginx.conf内で除外（推奨）
+
+特定のlocationやserverブロックでルールを除外する場合:
+
+```nginx
+server {
+    listen 80;
+    server_name example.com;
+    modsecurity on;
+    modsecurity_rules_file /usr/local/nginx/conf/modsecurity.conf;
+    
+    location /api {
+        # このlocationのみ特定のルールを除外
+        modsecurity_rules '
+          SecRuleRemoveById 932160
+          SecRuleRemoveById 942100
+        ';
+    }
+}
+```
+
+#### 方法2: modsecurity.confに除外ルールを追加
+
+全てのリクエストに対して特定のルールを除外する場合:
+
+```bash
+vim /usr/local/nginx/conf/modsecurity.conf
+```
+
+ファイルの末尾に以下を追加:
+
+```nginx
+# 特定のルールIDを除外
+SecRuleRemoveById 932160
+
+# 複数のルールIDを除外
+SecRuleRemoveById 932160 932161 932162
+
+# タグで除外（例: PHP関連のルールを全て除外）
+SecRuleRemoveByTag attack-php
+
+# メッセージパターンで除外
+SecRuleRemoveByMsg "Remote Command Execution"
+```
+
+**注意**: 特定のパス（URI）での除外は、nginx.confの`location`ブロック内で`modsecurity_rules`を使用する方法（方法1）を推奨する。
+
+#### 方法3: 除外設定ファイルを作成
+
+除外ルールを別ファイルに分離して管理する場合:
+
+```bash
+vim /usr/local/nginx/conf/custom-exclusions.conf
+```
+
+除外ルールを記述:
+
+```nginx
+# カスタム除外ルール
+SecRuleRemoveById 932160
+SecRuleRemoveById 942100
+
+# 特定のパラメータをチェック対象から除外
+SecRuleUpdateTargetById 942100 "!ARGS:legacy_param"
+```
+
+`modsecurity.conf`でインクルード:
+
+```bash
+echo "Include custom-exclusions.conf" >> /usr/local/nginx/conf/modsecurity.conf
+```
+
+**主要な除外ディレクティブ:**
+
+- `SecRuleRemoveById <id>` - ルールIDで除外
+- `SecRuleRemoveByTag <tag>` - タグで除外
+- `SecRuleRemoveByMsg <pattern>` - メッセージパターンで除外
+- `SecRuleUpdateTargetById <id> <targets>` - ルールIDのターゲットを変更
+- `SecRuleRemoveByTx <variable>` - トランザクション変数で除外
+
+**注意事項:**
+
+- ルールを除外する前に、なぜそのルールが発火したのかを確認する必要がある
+- 除外は必要最小限に留め、セキュリティリスクを評価する必要がある
+- 除外設定の変更後は`nginx -t`で設定を確認し、nginxをリロードする必要がある
 
 ### 10. systemdサービスの設定
 
@@ -263,3 +408,5 @@ ModSecurity: Access denied with code 403 (phase 2). Matched "Operator `Ge' with 
 ## 参考リンク
 
 - https://linux-jp.org/?p=12951
+- [OWASP ModSecurity Core Rule Set (CRS)](https://github.com/coreruleset/coreruleset) - OWASP CRS公式リポジトリ
+- [OWASP CRS Documentation](https://coreruleset.org/) - OWASP CRS公式ドキュメント
