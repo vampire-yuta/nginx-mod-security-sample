@@ -64,7 +64,7 @@ nginx version: nginx/1.28.0
 built by gcc 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04)
 built with OpenSSL 3.0.13 30 Jan 2024
 TLS SNI support enabled
-configure arguments: --user=nginx --group=nginx --with-pcre-jit --with-debug --with-compat --with-http_ssl_module --with-http_realip_module --with-stream --add-dynamic-module=/root/ModSecurity-nginx --http-log-path=/var/log/nginx/access.log --error-log-path=/var/log/nginx/error.log
+configure arguments: --user=nginx --group=nginx --with-pcre-jit --with-debug --with-compat --with-http_ssl_module --with-http_realip_module --with-stream --with-http_v2_module --add-dynamic-module=/root/ModSecurity-nginx --http-log-path=/var/log/nginx/access.log --error-log-path=/var/log/nginx/error.log
 ```
 
 ### 6. ModSecurity設定ファイルの配置
